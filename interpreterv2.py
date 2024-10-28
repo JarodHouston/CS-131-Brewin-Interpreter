@@ -8,6 +8,7 @@ class Interpreter(InterpreterBase):
         self.trace_output = trace_output
         self.bin_ops = ["+", "-", "*", "/"]
         self.bin_bool_ops = ["&&", "||"]
+        self.comp_ops = ["==", "!=", ">", "<", ">=", "<="]
         self.unary_ops = ["neg", "!"]
 
     def run(self, program):
@@ -81,31 +82,12 @@ class Interpreter(InterpreterBase):
         exp_type = expression.elem_type
 
         # Handles expression node as operators
-        if exp_type in self.bin_ops or exp_type in self.bin_bool_ops:
+        if exp_type in self.bin_ops or exp_type in self.bin_bool_ops or exp_type in self.comp_ops:
             op1 = expression.get("op1")
             op2 = expression.get("op2")
 
-            op1_type = op1.elem_type
-            op2_type = op2.elem_type
-
-            # if op1_type == "var":
-            #     val1 = self.get_variable(op1.get("name"))
-            # elif op1_type in self.bin_ops or op1_type in self.bin_bool_ops or op1_type in self.unary_ops:
-            #     val1 = self.evaluate_expression(op1)
-            # elif op1_type == "fcall" and op1.get("name") == "inputi":
-            #     val1 = self.handle_input(op1.get("args"))
-            # else:
-            #     val1 = op1.get("val")
             val1 = self.get_exp_value(op1)
-
-            if op2_type == "var":
-                val2 = self.get_variable(op2.get("name"))
-            elif op2_type in self.bin_ops or op2_type in self.bin_bool_ops or op2_type in self.unary_ops:
-                val2 = self.evaluate_expression(op2)
-            elif op2_type == "fcall" and op2.get("name") == "inputi":
-                val2 = self.handle_input(op2.get("args"))
-            else:
-                val2 = op2.get("val")
+            val2 = self.get_exp_value(op2)
             
             if self.is_not_type_valid_op(exp_type, val1, val2):
                 super().error(
@@ -113,35 +95,26 @@ class Interpreter(InterpreterBase):
                     "Incompatible types for arithmetic operation",
                 )
 
-            if exp_type == "&&":
-                if val1 == True and val2 == True:
-                    return "true"
-                return "false"
-            if exp_type == "||":
-                if val1 == True or val2 == True:
-                    return "true"
-                return "false"
+            if exp_type == "&&": return val1 and val2
+            if exp_type == "||": return val1 or val2
 
-            if exp_type == "+":
-                return val1 + val2
-            if exp_type == "-":
-                return val1 - val2
-            if exp_type == "*":
-                return val1 * val2
-            return int(val1 / val2)
+            if exp_type == "==": return val1 == val2
+            if exp_type == "!=": return val1 != val2
+            if exp_type == ">": return val1 > val2
+            if exp_type == "<": return val1 < val2
+            if exp_type == ">=": return val1 >= val2
+            if exp_type == "<=": return val1 <= val2
+
+            if exp_type == "+": return val1 + val2
+            if exp_type == "-": return val1 - val2
+            if exp_type == "*": return val1 * val2
+            if exp_type == "/": return int(val1 / val2)
+
+            return "Error in evaluating expression"
         
         if exp_type in self.unary_ops:
             op1 = expression.get("op1")
-            op1_type = op1.elem_type
-
-            if op1_type == "var":
-                val1 = self.get_variable(op1.get("name"))
-            elif op1_type in self.bin_ops or op1_type in self.bin_bool_ops or op1_type in self.unary_ops:
-                val1 = self.evaluate_expression(op1)
-            elif op1_type == "fcall" and op1.get("name") == "inputi":
-                val1 = self.handle_input(op1.get("args"))
-            else:
-                val1 = op1.get("val")
+            val1 = self.get_exp_value(op1)
             
             if self.is_not_type_valid_unary_op(exp_type, val1):
                 super().error(
@@ -149,11 +122,9 @@ class Interpreter(InterpreterBase):
                     "Incompatible types for arithmetic operation",
                 )
             
-            if exp_type == "neg":
-                return val1 * -1
-            if val1 == "false":
-                return "true"
-            return "false"
+            if exp_type == "neg": return val1 * -1
+            if val1 is False: return True
+            return False
         
         # Handles evaluating assignment to value
         if exp_type == "int" or exp_type == "string" or exp_type == "bool":
@@ -164,8 +135,8 @@ class Interpreter(InterpreterBase):
             value = self.get_variable(expression.get("name"))
             return value
 
-        if exp_type == "fcall" and expression.get("name") == "inputi":
-            return self.handle_input(expression.get("args"))
+        if exp_type == "fcall" and (expression.get("name") == "inputi" or expression.get("name") == "inputs"):
+            return self.handle_input(expression.get("name"), expression.get("args"))
     
     def do_func_call(self, func_call):
         func_name = func_call.get("name")
@@ -179,19 +150,20 @@ class Interpreter(InterpreterBase):
                         total_output = total_output + "true"
                     else:
                         total_output = total_output + "false"
-                elif arg.elem_type == "var":
-                    value = self.get_variable(arg.get("name"))
+                else:
+                    if arg.elem_type == "var":
+                        value = self.get_variable(arg.get("name"))
+                    elif arg.elem_type in self.bin_ops or arg.elem_type in self.bin_bool_ops or arg.elem_type in self.unary_ops or arg.elem_type in self.comp_ops:
+                        value = self.evaluate_expression(arg)
+
                     if value is True:
                         value = "true"
                     elif value is False:
                         value = "false"
                     total_output = total_output + str(value)
-                elif arg.elem_type in self.bin_ops or arg.elem_type in self.bin_bool_ops or arg.elem_type in self.unary_ops:
-                    value = self.evaluate_expression(arg)
-                    total_output = total_output + str(value)
             super().output(total_output)
-        elif func_name == "inputi":
-            self.handle_input(func_call.get("args"))
+        elif func_name == "inputi" or func_name == "inputs":
+            self.handle_input(func_name, func_call.get("args"))
         else:
             super().error(
                 ErrorType.NAME_ERROR,
@@ -203,10 +175,10 @@ class Interpreter(InterpreterBase):
 
         if op_type == "var":
             val = self.get_variable(op.get("name"))
-        elif op_type in self.bin_ops or op_type in self.bin_bool_ops or op_type in self.unary_ops:
+        elif op_type in self.bin_ops or op_type in self.bin_bool_ops or op_type in self.unary_ops or op_type in self.comp_ops:
             val = self.evaluate_expression(op)
-        elif op_type == "fcall" and op.get("name") == "inputi":
-            val = self.handle_input(op.get("args"))
+        elif op_type == "fcall" and (op.get("name") == "inputi" or op.get("name") == "inputs"):
+            val = self.handle_input(op.get("name"), op.get("args"))
         else:
             val = op.get("val")
 
@@ -222,27 +194,47 @@ class Interpreter(InterpreterBase):
             return None
         return self.variable_name_to_value[var_name]
     
-    def handle_input(self, args):
+    def handle_input(self, func_name, args):
         if len(args) > 1:
             super().error(
                 ErrorType.NAME_ERROR,
-                f"No inputi() function found that takes > 1 parameter",
+                f"No {func_name}() function found that takes > 1 parameter",
             )
         else:
             if len(args) == 1:
                 super().output(args[0].get("val"))
             user_input = super().get_input()
-            return int(user_input)
+            if func_name == "inputi":
+                return int(user_input)
+            return user_input
     
     def is_not_type_valid_op(self, exp_type, val1, val2):
-        if ((type(val1) != type(val2)) or
-            (exp_type in self.bin_bool_ops and (not isinstance(val1, bool) or not isinstance(val2, bool))) or
-            (exp_type == "+" and ((not isinstance(val1, (int, str)) and not isinstance(val2, (int, str))) or (isinstance(val1, bool)))) or
-            (exp_type in self.bin_ops and exp_type != "+" and ((not isinstance(val1, int) and not isinstance(val2, int)) or (isinstance(val1, bool))))):
-            return True
+        if exp_type in self.comp_ops:
+            if not exp_type == "==" and not exp_type == "!=":
+                if isinstance(val1, bool): return True
+                if not isinstance(val1, int): return True
+        if type(val1) != type(val2): return True
+        if exp_type in self.bin_ops:
+            if isinstance(val1, bool): return True
+            if exp_type == "+":
+                if not isinstance(val1, (int, str)): return True
+            else:
+                if not isinstance(val1, int): return True
+        if exp_type in self.bin_bool_ops:
+            if not isinstance(val1, bool): return True
+        # if ((type(val1) != type(val2)) or
+        #     (exp_type in self.bin_bool_ops and (not isinstance(val1, bool) or not isinstance(val2, bool))) or
+        #     (exp_type == "+" and ((not isinstance(val1, (int, str)) and not isinstance(val2, (int, str))) or (isinstance(val1, bool)))) or
+        #     (exp_type in self.bin_ops and exp_type != "+" and ((not isinstance(val1, int) and not isinstance(val2, int)) or (isinstance(val1, bool))))):
+        #     return True
 
     def is_not_type_valid_unary_op(self, exp_type, val1):
-        if ((exp_type == "neg" and (not isinstance(val1, int) or isinstance(val1, bool))) or
-            (exp_type == "!" and not isinstance(val1, bool))):
-            return True
+        if exp_type == "neg":
+            if isinstance(val1, bool): return True
+            if not isinstance(val1, int): return True
+        if exp_type == "!":
+            if not isinstance(val1, bool): return True
+        # if ((exp_type == "neg" and (not isinstance(val1, int) or isinstance(val1, bool))) or
+        #     (exp_type == "!" and not isinstance(val1, bool))):
+        #     return True
         
