@@ -48,7 +48,7 @@ class Interpreter(InterpreterBase):
         elif statement.elem_type == "if":
             self.do_if_statement(statement)
         elif statement.elem_type == "for":
-            self.do_for_loop
+            self.do_for_loop(statement)
     
     def do_definition(self, definition):
         var_name = definition.get("name")
@@ -181,7 +181,25 @@ class Interpreter(InterpreterBase):
         self.stack.pop()       
 
     def do_for_loop(self, for_loop):
-        pass 
+        init = for_loop.get("init")
+        condition = for_loop.get("condition")
+        update = for_loop.get("update")
+        statements = for_loop.get("statements")
+
+        self.do_assignment(init)
+
+        if not isinstance(self.evaluate_expression(condition), bool):
+            super().error(
+                ErrorType.NAME_ERROR,
+                f"For loop condition does not evaluate to boolean",
+            )
+        
+        while self.evaluate_expression(condition):
+            self.stack.append({self.curr_func:{}})
+            for s in statements:
+                self.run_statement(s)
+            self.do_assignment(update)
+            self.stack.pop()
     
     def get_exp_value(self, op):
         op_type = op.elem_type
