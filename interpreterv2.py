@@ -11,12 +11,9 @@ class Interpreter(InterpreterBase):
         self.comp_ops = ["==", "!=", ">", "<", ">=", "<="]
         self.unary_ops = ["neg", "!"]
         self.curr_func = None
-        self.curr_nesting_level = 1
 
     def run(self, program):
         ast = parse_program(program)
-        # Start storing function name, nesting level, and variable name to value, like ("main", 1, "x"): 5
-        self.variable_to_value = {}
         # Stack of scopes, dictionary with key: tuple (function name, nesting level), value: (list of variables in current scope)
         # key: function name, value: hash map? where you have the key be variable name and value be the value of the variable
         self.stack = []
@@ -29,7 +26,6 @@ class Interpreter(InterpreterBase):
             )
         self.curr_func = "main"
         self.stack.append({self.curr_func:{}})
-        self.curr_nesting_level = 1
         if self.trace_output:
             print(main_func_node)
         self.run_func(main_func_node)
@@ -50,36 +46,33 @@ class Interpreter(InterpreterBase):
         elif statement.elem_type == "fcall":
             self.do_func_call(statement)
         elif statement.elem_type == "if":
-            self.curr_nesting_level = self.curr_nesting_level + 1
             self.do_if_statement(statement)
+        elif statement.elem_type == "for":
+            self.do_for_loop
     
     def do_definition(self, definition):
         var_name = definition.get("name")
-        # var_tuple = (self.curr_func, self.curr_nesting_level, var_name)
-        # if var_name in self.variable_to_value:
         if var_name in self.stack[-1][self.curr_func]:
             super().error(
                 ErrorType.NAME_ERROR,
                 f"Variable {var_name} defined more than once",
             )
         else:
-            # self.variable_to_value[var_name] = None
             self.stack[-1][self.curr_func][var_name] = None
     
     def do_assignment(self, assignment):
         var_name = assignment.get("name")
-        # var_tuple = (self.curr_func, self.curr_nesting_level, var_name)
-        # if var_name not in self.variable_to_value:
-        if var_name not in self.stack[-1][self.curr_func]:
-            super().error(
-                ErrorType.NAME_ERROR,
-                f"Variable {var_name} has not been defined",
-            )
-        else:
+        scope = self.get_scope(var_name)
+        if scope:
+        # if var_name not in self.stack[-1][self.curr_func]:
+        #     super().error(
+        #         ErrorType.NAME_ERROR,
+        #         f"Variable {var_name} has not been defined",
+        #     )
+        # else:
             expression = assignment.get("expression")
             expression_result = self.evaluate_expression(expression)
-            # self.variable_to_value[var_name] = expression_result
-            self.stack[-1][self.curr_func][var_name] = expression_result
+            scope[self.curr_func][var_name] = expression_result
 
     def evaluate_expression(self, expression):
         exp_type = expression.elem_type
@@ -174,14 +167,21 @@ class Interpreter(InterpreterBase):
             )
     
     def do_if_statement(self, if_statement):
-        # print(if_statement.get("condition"))
-        # print(if_statement.get("statements"))
-        # print(if_statement.get("else_statements"))
-        # print(self.curr_func)
-        # print(self.curr_nesting_level)
         statements = if_statement.get("statements")
-        for s in statements:
-            self.run_statement(s)
+        else_statements = if_statement.get("else_statements")
+        self.stack.append({self.curr_func:{}})
+
+        condition = self.evaluate_expression(if_statement.get("condition"))
+        if condition:
+            for s in statements:
+                self.run_statement(s)
+        else:
+            for s in else_statements:
+                self.run_statement(s)
+        self.stack.pop()       
+
+    def do_for_loop(self, for_loop):
+        pass 
     
     def get_exp_value(self, op):
         op_type = op.elem_type
@@ -197,18 +197,26 @@ class Interpreter(InterpreterBase):
 
         return val
 
+    def get_scope(self, var_name):
+        for scope in reversed(self.stack):
+            if self.curr_func in scope and var_name in scope[self.curr_func]:
+                return scope
+        super().error(
+            ErrorType.NAME_ERROR,
+            f"Variable {var_name} has not been defined",
+        )
     
     def get_variable(self, var_name):
-        # var_tuple = (self.curr_func, self.curr_nesting_level, var_name)
-        # if var_name not in self.variable_to_value:
-        if var_name not in self.stack[-1][self.curr_func]:
-            super().error(
-                ErrorType.NAME_ERROR,
-                f"Variable {var_name} has not been defined",
-            )
-            return None
-        # return self.variable_to_value[var_name]
-        return self.stack[-1][self.curr_func][var_name]
+        # if var_name not in self.stack[-1][self.curr_func]:
+            # super().error(
+            #     ErrorType.NAME_ERROR,
+            #     f"Variable {var_name} has not been defined",
+            # )
+        scope = self.get_scope(var_name)
+        if scope:
+            return scope[self.curr_func][var_name]
+        
+        # return self.stack[-1][self.curr_func][var_name]
     
     def handle_input(self, func_name, args):
         if len(args) > 1:
