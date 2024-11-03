@@ -26,7 +26,7 @@ class Interpreter(InterpreterBase):
                 "No main() function was found",
             )
         
-        self.run_func(main_func_node)
+        self.run_func(main_func_node, main_func_node.get("args"))
     
     def get_func_list(self, ast):
         func_list = {}
@@ -34,21 +34,31 @@ class Interpreter(InterpreterBase):
             func_list[function.get("name")] = function
         return func_list
 
-    def run_func(self, func_node):
-        self.stack.append([{}])
+    def run_func(self, func_node, call_arguments):
+        list_to_append = [{}]
+        for arg in call_arguments:
+            print(arg)
         print(self.stack)
         func_args = func_node.get("args")
-        for arg in func_args:
-            for scope in reversed(self.stack[-2]):
-                var_name = arg.get("name")
-                if scope.get(var_name):
-                    self.stack[-1][-1][var_name] = scope[var_name]
+        for i in range(len(func_args)):
+            var_name = func_args[i].get("name")
+            list_to_append[0][var_name] = self.evaluate_expression(call_arguments[i])
+            # self.stack[-1][-1][var_name] = self.evaluate_expression(call_arguments[i])
+        self.stack.append(list_to_append)
+        # for arg in func_args:
+        #     for scope in reversed(self.stack[-2]):
+        #         var_name = arg.get("name")
+        #         if scope.get(var_name):
+        #             self.stack[-1][-1][var_name] = scope[var_name]
         self.stack[-1].append({})
         statements = func_node.get("statements")
+        result = None
         for s in statements:
-            self.run_statement(s)
-        print(self.stack)
+            result = self.run_statement(s)
+        # print(self.stack)
         self.stack.pop()
+
+        return result
 
     def run_statement(self, statement):
         if statement.elem_type == "vardef":
@@ -56,11 +66,14 @@ class Interpreter(InterpreterBase):
         elif statement.elem_type == "=":
             self.do_assignment(statement)
         elif statement.elem_type == "fcall":
+            print(statement)
             self.do_func_call(statement)
         elif statement.elem_type == "if":
             self.do_if_statement(statement)
         elif statement.elem_type == "for":
             self.do_for_loop(statement)
+        elif statement.elem_type == "return":
+            return self.do_return_statement(statement)
     
     def do_definition(self, definition):
         var_name = definition.get("name")
@@ -146,8 +159,10 @@ class Interpreter(InterpreterBase):
             value = self.get_variable(expression.get("name"))
             return value
 
-        if exp_type == "fcall" and (expression.get("name") == "inputi" or expression.get("name") == "inputs"):
-            return self.handle_input(expression.get("name"), expression.get("args"))
+        if exp_type == "fcall":
+            if expression.get("name") == "inputi" or expression.get("name") == "inputs":
+                return self.handle_input(expression.get("name"), expression.get("args"))
+            return self.do_func_call(expression)
     
     def do_func_call(self, func_call):
         func_name = func_call.get("name")
@@ -161,6 +176,8 @@ class Interpreter(InterpreterBase):
                         total_output = total_output + "true"
                     else:
                         total_output = total_output + "false"
+                elif arg.elem_type == "fcall":
+                    total_output = self.do_func_call(arg)
                 else:
                     if arg.elem_type == "var":
                         value = self.get_variable(arg.get("name"))
@@ -177,12 +194,12 @@ class Interpreter(InterpreterBase):
             self.handle_input(func_name, func_call.get("args"))
         else:
             func_node = self.func_list.get(func_name)
-            self.run_func(func_node)
             if not func_node:
                 super().error(
                     ErrorType.NAME_ERROR,
                     f"Function {func_name} has not been defined",
                 )
+            return self.run_func(func_node, func_call.get("args"))
     
     def do_if_statement(self, if_statement):
         statements = if_statement.get("statements")
@@ -193,7 +210,7 @@ class Interpreter(InterpreterBase):
         if condition:
             for s in statements:
                 self.run_statement(s)
-        else:
+        elif else_statements:
             for s in else_statements:
                 self.run_statement(s)
         self.stack[-1].pop()       
@@ -218,6 +235,12 @@ class Interpreter(InterpreterBase):
                 self.run_statement(s)
             self.do_assignment(update)
             self.stack[-1].pop()
+
+    def do_return_statement(self, statement):
+        if not statement.get("expression"):
+            return None
+        result = self.evaluate_expression(statement.get("expression"))
+        return result
     
     def get_exp_value(self, op):
         op_type = op.elem_type
@@ -226,8 +249,11 @@ class Interpreter(InterpreterBase):
             val = self.get_variable(op.get("name"))
         elif op_type in self.bin_ops or op_type in self.bin_bool_ops or op_type in self.unary_ops or op_type in self.comp_ops:
             val = self.evaluate_expression(op)
-        elif op_type == "fcall" and (op.get("name") == "inputi" or op.get("name") == "inputs"):
-            val = self.handle_input(op.get("name"), op.get("args"))
+        elif op_type == "fcall":
+            if op.get("name") == "inputi" or op.get("name") == "inputs":
+                val = self.handle_input(op.get("name"), op.get("args"))
+            else:
+                val = self.do_func_call(op)
         else:
             val = op.get("val")
 
