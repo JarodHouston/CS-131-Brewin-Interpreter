@@ -36,30 +36,17 @@ class Interpreter(InterpreterBase):
 
     def run_func(self, func_node, call_arguments):
         list_to_append = [{}]
-        # for arg in call_arguments:
-        #     print(arg)
-        # print(self.stack)
         func_args = func_node.get("args")
         for i in range(len(func_args)):
             var_name = func_args[i].get("name")
             list_to_append[0][var_name] = self.evaluate_expression(call_arguments[i])
-            # self.stack[-1][-1][var_name] = self.evaluate_expression(call_arguments[i])
+
         self.stack.append(list_to_append)
-        # for arg in func_args:
-        #     for scope in reversed(self.stack[-2]):
-        #         var_name = arg.get("name")
-        #         if scope.get(var_name):
-        #             self.stack[-1][-1][var_name] = scope[var_name]
         self.stack[-1].append({})
         statements = func_node.get("statements")
         result = None
-        # for s in statements:
-        #     if s.elem_type == "return":
-        #         result = self.do_return_statement(s)
-        #         break
         stack_length = len(self.stack)
         result = self.run_statements(statements)
-        # print(self.stack)
         if len(self.stack) == stack_length:
             self.stack.pop()
 
@@ -80,7 +67,6 @@ class Interpreter(InterpreterBase):
             elif statement.elem_type == "for":
                 result = self.do_for_loop(statement)
             elif statement.elem_type == "return":
-                print(self.stack)
                 result = self.do_return_statement(statement)
                 self.stack.pop()
                 return result
@@ -132,6 +118,11 @@ class Interpreter(InterpreterBase):
             if exp_type == "&&": return val1 and val2
             if exp_type == "||": return val1 or val2
 
+            if exp_type == "==" and not isinstance(val1, type(val2)):
+                return False
+            if exp_type == "!=" and not isinstance(val1, type(val2)):
+                return True
+
             if exp_type == "==": return val1 == val2
             if exp_type == "!=": return val1 != val2
             if exp_type == ">": return val1 > val2
@@ -142,7 +133,7 @@ class Interpreter(InterpreterBase):
             if exp_type == "+": return val1 + val2
             if exp_type == "-": return val1 - val2
             if exp_type == "*": return val1 * val2
-            if exp_type == "/": return int(val1 / val2)
+            if exp_type == "/": return int(val1 // val2)
 
             return "Error in evaluating expression"
         
@@ -190,7 +181,7 @@ class Interpreter(InterpreterBase):
                     else:
                         total_output = total_output + "false"
                 elif arg.elem_type == "fcall":
-                    total_output = self.do_func_call(arg)
+                    total_output = total_output + str(self.do_func_call(arg))
                 else:
                     if arg.elem_type == "var":
                         value = self.get_variable(arg.get("name"))
@@ -220,17 +211,19 @@ class Interpreter(InterpreterBase):
         self.stack[-1].append({})
 
         condition = self.evaluate_expression(if_statement.get("condition"))
+        if not isinstance(condition, bool):
+            super().error(
+                ErrorType.TYPE_ERROR,
+                f"If statement condition does not evaluate to boolean"
+            )
         result = None
+        stack_length = len(self.stack)
         if condition:
-            # for s in statements:
-            #     if s.elem_type == "return":
-            #         result = self.do_return_statement(s)
-            #         break
             result = self.run_statements(statements)
         elif else_statements:
-            # for s in else_statements:
             result = self.run_statements(else_statements)
-        self.stack[-1].pop()   
+        if len(self.stack) == stack_length:
+            self.stack[-1].pop()   
         return result    
 
     def do_for_loop(self, for_loop):
@@ -243,7 +236,7 @@ class Interpreter(InterpreterBase):
 
         if not isinstance(self.evaluate_expression(condition), bool):
             super().error(
-                ErrorType.NAME_ERROR,
+                ErrorType.TYPE_ERROR,
                 f"For loop condition does not evaluate to boolean",
             )
         
@@ -251,10 +244,13 @@ class Interpreter(InterpreterBase):
             self.stack[-1].append({})
             result = None
             # for s in statements:
+            stack_length = len(self.stack)
             result = self.run_statements(statements)
+            if len(self.stack) != stack_length:
+                return result
             self.do_assignment(update)
             self.stack[-1].pop()
-            return result
+        return result
 
     def do_return_statement(self, statement):
         if not statement.get("expression"):
@@ -289,16 +285,9 @@ class Interpreter(InterpreterBase):
         )
     
     def get_variable(self, var_name):
-        # if var_name not in self.stack[-1][self.curr_func]:
-            # super().error(
-            #     ErrorType.NAME_ERROR,
-            #     f"Variable {var_name} has not been defined",
-            # )
         scope = self.get_scope(var_name)
         if scope:
             return scope[var_name]
-        
-        # return self.stack[-1][self.curr_func][var_name]
     
     def handle_input(self, func_name, args):
         if len(args) > 1:
@@ -319,6 +308,8 @@ class Interpreter(InterpreterBase):
             if not exp_type == "==" and not exp_type == "!=":
                 if isinstance(val1, bool): return True
                 if not isinstance(val1, int): return True
+            else:
+                return False
         if type(val1) != type(val2): return True
         if exp_type in self.bin_ops:
             if isinstance(val1, bool): return True
