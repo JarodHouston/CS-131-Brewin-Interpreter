@@ -10,33 +10,45 @@ class Interpreter(InterpreterBase):
         self.bin_bool_ops = ["&&", "||"]
         self.comp_ops = ["==", "!=", ">", "<", ">=", "<="]
         self.unary_ops = ["neg", "!"]
-        self.curr_func = None
 
     def run(self, program):
         ast = parse_program(program)
         # Stack of scopes, dictionary with key: tuple (function name, nesting level), value: (list of variables in current scope)
         # key: function name, value: hash map? where you have the key be variable name and value be the value of the variable
+        # Okay, try a stack of stacks when implementing functions/recursions
         self.stack = []
 
-        main_func_node = self.get_main_func_node(ast)
-        if not main_func_node or main_func_node.get("name") != "main":
+        self.func_list = self.get_func_list(ast)
+        main_func_node = self.func_list.get("main")
+        if not main_func_node:
             super().error(
                 ErrorType.NAME_ERROR,
                 "No main() function was found",
             )
-        self.curr_func = "main"
-        self.stack.append({self.curr_func:{}})
-        if self.trace_output:
-            print(main_func_node)
+        
         self.run_func(main_func_node)
     
-    def get_main_func_node(self, ast):
-        return ast.get("functions")[0]
+    def get_func_list(self, ast):
+        func_list = {}
+        for function in ast.get("functions"):
+            func_list[function.get("name")] = function
+        return func_list
 
-    def run_func(self, main_func_node):
-        statements = main_func_node.get("statements")
+    def run_func(self, func_node):
+        self.stack.append([{}])
+        print(self.stack)
+        func_args = func_node.get("args")
+        for arg in func_args:
+            for scope in reversed(self.stack[-2]):
+                var_name = arg.get("name")
+                if scope.get(var_name):
+                    self.stack[-1][-1][var_name] = scope[var_name]
+        self.stack[-1].append({})
+        statements = func_node.get("statements")
         for s in statements:
             self.run_statement(s)
+        print(self.stack)
+        self.stack.pop()
 
     def run_statement(self, statement):
         if statement.elem_type == "vardef":
@@ -52,13 +64,13 @@ class Interpreter(InterpreterBase):
     
     def do_definition(self, definition):
         var_name = definition.get("name")
-        if var_name in self.stack[-1][self.curr_func]:
+        if var_name in self.stack[-1][-1]:
             super().error(
                 ErrorType.NAME_ERROR,
                 f"Variable {var_name} defined more than once",
             )
         else:
-            self.stack[-1][self.curr_func][var_name] = None
+            self.stack[-1][-1][var_name] = None
     
     def do_assignment(self, assignment):
         var_name = assignment.get("name")
@@ -72,7 +84,7 @@ class Interpreter(InterpreterBase):
         # else:
             expression = assignment.get("expression")
             expression_result = self.evaluate_expression(expression)
-            scope[self.curr_func][var_name] = expression_result
+            scope[var_name] = expression_result
 
     def evaluate_expression(self, expression):
         exp_type = expression.elem_type
@@ -126,6 +138,9 @@ class Interpreter(InterpreterBase):
         if exp_type == "int" or exp_type == "string" or exp_type == "bool":
             return expression.get("val")
         
+        if exp_type == "nil":
+            return None
+        
         # Handles evaluating assignment to variable
         if exp_type == "var":
             value = self.get_variable(expression.get("name"))
@@ -161,15 +176,18 @@ class Interpreter(InterpreterBase):
         elif func_name == "inputi" or func_name == "inputs":
             self.handle_input(func_name, func_call.get("args"))
         else:
-            super().error(
-                ErrorType.NAME_ERROR,
-                f"Function {func_name} has not been defined",
-            )
+            func_node = self.func_list.get(func_name)
+            self.run_func(func_node)
+            if not func_node:
+                super().error(
+                    ErrorType.NAME_ERROR,
+                    f"Function {func_name} has not been defined",
+                )
     
     def do_if_statement(self, if_statement):
         statements = if_statement.get("statements")
         else_statements = if_statement.get("else_statements")
-        self.stack.append({self.curr_func:{}})
+        self.stack[-1].append({})
 
         condition = self.evaluate_expression(if_statement.get("condition"))
         if condition:
@@ -178,7 +196,7 @@ class Interpreter(InterpreterBase):
         else:
             for s in else_statements:
                 self.run_statement(s)
-        self.stack.pop()       
+        self.stack[-1].pop()       
 
     def do_for_loop(self, for_loop):
         init = for_loop.get("init")
@@ -195,11 +213,11 @@ class Interpreter(InterpreterBase):
             )
         
         while self.evaluate_expression(condition):
-            self.stack.append({self.curr_func:{}})
+            self.stack[-1].append({})
             for s in statements:
                 self.run_statement(s)
             self.do_assignment(update)
-            self.stack.pop()
+            self.stack[-1].pop()
     
     def get_exp_value(self, op):
         op_type = op.elem_type
@@ -216,8 +234,8 @@ class Interpreter(InterpreterBase):
         return val
 
     def get_scope(self, var_name):
-        for scope in reversed(self.stack):
-            if self.curr_func in scope and var_name in scope[self.curr_func]:
+        for scope in reversed(self.stack[-1]):
+            if var_name in scope:
                 return scope
         super().error(
             ErrorType.NAME_ERROR,
@@ -232,7 +250,7 @@ class Interpreter(InterpreterBase):
             # )
         scope = self.get_scope(var_name)
         if scope:
-            return scope[self.curr_func][var_name]
+            return scope[var_name]
         
         # return self.stack[-1][self.curr_func][var_name]
     
