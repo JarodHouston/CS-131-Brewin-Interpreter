@@ -19,7 +19,7 @@ class Interpreter(InterpreterBase):
         self.stack = []
 
         self.func_list = self.get_func_list(ast)
-        main_func_node = self.func_list.get("main")
+        main_func_node = next((value for key, value in self.func_list.items() if key[0] == "main"), None)
         if not main_func_node:
             super().error(
                 ErrorType.NAME_ERROR,
@@ -31,14 +31,14 @@ class Interpreter(InterpreterBase):
     def get_func_list(self, ast):
         func_list = {}
         for function in ast.get("functions"):
-            func_list[function.get("name")] = function
+            func_list[(function.get("name"), len(function.get("args")))] = function
         return func_list
 
     def run_func(self, func_node, call_arguments):
         list_to_append = [{}]
-        for arg in call_arguments:
-            print(arg)
-        print(self.stack)
+        # for arg in call_arguments:
+        #     print(arg)
+        # print(self.stack)
         func_args = func_node.get("args")
         for i in range(len(func_args)):
             var_name = func_args[i].get("name")
@@ -53,27 +53,40 @@ class Interpreter(InterpreterBase):
         self.stack[-1].append({})
         statements = func_node.get("statements")
         result = None
-        for s in statements:
-            result = self.run_statement(s)
+        # for s in statements:
+        #     if s.elem_type == "return":
+        #         result = self.do_return_statement(s)
+        #         break
+        stack_length = len(self.stack)
+        result = self.run_statements(statements)
         # print(self.stack)
-        self.stack.pop()
+        if len(self.stack) == stack_length:
+            self.stack.pop()
 
         return result
 
-    def run_statement(self, statement):
-        if statement.elem_type == "vardef":
-            self.do_definition(statement)
-        elif statement.elem_type == "=":
-            self.do_assignment(statement)
-        elif statement.elem_type == "fcall":
-            print(statement)
-            self.do_func_call(statement)
-        elif statement.elem_type == "if":
-            self.do_if_statement(statement)
-        elif statement.elem_type == "for":
-            self.do_for_loop(statement)
-        elif statement.elem_type == "return":
-            return self.do_return_statement(statement)
+    def run_statements(self, statements):
+        stack_length = len(self.stack)
+        for statement in statements:
+            result = None
+            if statement.elem_type == "vardef":
+                self.do_definition(statement)
+            elif statement.elem_type == "=":
+                self.do_assignment(statement)
+            elif statement.elem_type == "fcall":
+                result = self.do_func_call(statement)              
+            elif statement.elem_type == "if":
+                result = self.do_if_statement(statement)
+            elif statement.elem_type == "for":
+                result = self.do_for_loop(statement)
+            elif statement.elem_type == "return":
+                print(self.stack)
+                result = self.do_return_statement(statement)
+                self.stack.pop()
+                return result
+            
+            if len(self.stack) < stack_length:
+                return result
     
     def do_definition(self, definition):
         var_name = definition.get("name")
@@ -193,7 +206,7 @@ class Interpreter(InterpreterBase):
         elif func_name == "inputi" or func_name == "inputs":
             self.handle_input(func_name, func_call.get("args"))
         else:
-            func_node = self.func_list.get(func_name)
+            func_node = self.func_list.get((func_name, len(func_call.get("args"))))
             if not func_node:
                 super().error(
                     ErrorType.NAME_ERROR,
@@ -207,13 +220,18 @@ class Interpreter(InterpreterBase):
         self.stack[-1].append({})
 
         condition = self.evaluate_expression(if_statement.get("condition"))
+        result = None
         if condition:
-            for s in statements:
-                self.run_statement(s)
+            # for s in statements:
+            #     if s.elem_type == "return":
+            #         result = self.do_return_statement(s)
+            #         break
+            result = self.run_statements(statements)
         elif else_statements:
-            for s in else_statements:
-                self.run_statement(s)
-        self.stack[-1].pop()       
+            # for s in else_statements:
+            result = self.run_statements(else_statements)
+        self.stack[-1].pop()   
+        return result    
 
     def do_for_loop(self, for_loop):
         init = for_loop.get("init")
@@ -231,10 +249,12 @@ class Interpreter(InterpreterBase):
         
         while self.evaluate_expression(condition):
             self.stack[-1].append({})
-            for s in statements:
-                self.run_statement(s)
+            result = None
+            # for s in statements:
+            result = self.run_statements(statements)
             self.do_assignment(update)
             self.stack[-1].pop()
+            return result
 
     def do_return_statement(self, statement):
         if not statement.get("expression"):
