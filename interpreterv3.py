@@ -36,9 +36,7 @@ class Interpreter(InterpreterBase):
 
     def run(self, program):
         ast = parse_program(program)
-        # Stack of scopes, dictionary with key: tuple (function name, nesting level), value: (list of variables in current scope)
-        # key: function name, value: hash map? where you have the key be variable name and value be the value of the variable
-        # Okay, try a stack of stacks when implementing functions/recursions
+        # Stack of stacks of dictionaries
         self.stack = []
 
         self.func_list = self.get_func_list(ast)
@@ -62,7 +60,8 @@ class Interpreter(InterpreterBase):
         func_args = func_node.get("args")
         for i in range(len(func_args)):
             var_name = func_args[i].get("name")
-            list_to_append[0][var_name] = self.evaluate_expression(call_arguments[i])
+            var_type = func_args[i].get("var_type")
+            list_to_append[0][var_name] = Value(var_type, self.evaluate_expression(call_arguments[i]))
 
         self.stack.append(list_to_append)
         self.stack[-1].append({})
@@ -362,4 +361,3 @@ class Interpreter(InterpreterBase):
             if not isinstance(val1, int): return True
         if exp_type == "!":
             if not isinstance(val1, bool): return True
-            
