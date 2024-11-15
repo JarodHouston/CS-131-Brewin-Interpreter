@@ -21,10 +21,12 @@ class Struct:
             type = elem.get("var_type")
             if type == "bool":
                 default_val = False
-            if type == "int":
+            elif type == "int":
                 default_val = 0
-            if type == "string":
+            elif type == "string":
                 default_val = ""
+            else:
+                default_val = Type.NIL
             attr_list[elem.get("name")] = Value(type, default_val)
         self.attr = attr_list
     
@@ -73,11 +75,12 @@ class Interpreter(InterpreterBase):
         # List of Struct objects
         self.structs = []
 
-        self.func_list = self.get_func_list(ast)
         # List of struct objects
         self.struct_list = []
         # List of defined structs
         self.defined_structs = self.get_defined_structs(ast)
+        # List of functions
+        self.func_list = self.get_func_list(ast)
         main_func_node = next((value for key, value in self.func_list.items() if key[0] == "main"), None)
         if not main_func_node:
             super().error(
@@ -91,7 +94,42 @@ class Interpreter(InterpreterBase):
         func_list = {}
         for function in ast.get("functions"):
             func_list[(function.get("name"), len(function.get("args")))] = function
+        self.check_function_validity(func_list)
         return func_list
+    
+    # def check_struct_attr_validity(self):
+    #     initialized_structs = []
+    #     for struct in self.defined_structs:
+    #         initialized_structs.extend(struct.keys())
+    #         for val in struct.values():
+    #             for attr in val:
+    #                 print(attr)
+    
+    def check_function_validity(self, func_list):
+        for key in func_list:
+            return_type = func_list[key].get("return_type")
+            if return_type is None:
+                super().error(
+                    ErrorType.TYPE_ERROR,
+                    "Function missing its return type",
+                )
+            if not self.is_valid_type(return_type):
+                super().error(
+                    ErrorType.TYPE_ERROR,
+                    "Function has invalid return type",
+                )
+            for arg in func_list[key].get("args"):
+                arg_var_type = arg.get("var_type")
+                if arg_var_type is None:
+                    super().error(
+                        ErrorType.TYPE_ERROR,
+                        "Function argument missing its type",
+                    )
+                if not self.is_valid_type(arg_var_type):
+                    super().error(
+                        ErrorType.TYPE_ERROR,
+                        "Function has invalid argument type",
+                    )
     
     def get_defined_structs(self, ast):
         struct_list = []
@@ -168,11 +206,19 @@ class Interpreter(InterpreterBase):
             if type in struct:
                 return Value(Type.NODE, Type.NIL)
         else:
-            raise ValueError("Unknown value type")
+            super().error(
+                ErrorType.TYPE_ERROR,
+                "Unknown value type",
+            )
     
     def do_definition(self, definition):
         var_name = definition.get("name")
         var_type = definition.get("var_type")
+        if not self.is_valid_type(var_type):
+            super().error(
+                ErrorType.TYPE_ERROR,
+                "Invalid type in variable definition",
+            )
         if var_name in self.stack[-1][-1]:
             super().error(
                 ErrorType.NAME_ERROR,
@@ -196,6 +242,7 @@ class Interpreter(InterpreterBase):
         struct_name = None
         attr_name = None
         if "." in var_name:
+            
             struct_name, attr_name = var_name.split('.')
         if struct_name and attr_name:
             return (struct_name, attr_name)
@@ -211,6 +258,11 @@ class Interpreter(InterpreterBase):
             expression = assignment.get("expression")
             expression_result = self.evaluate_expression(expression)
             if len(split) > 1:
+                if type(scope[var_name].value) is not Struct:
+                    super().error(
+                        ErrorType.FAULT_ERROR,
+                        "Variable to the left of the dot is not of type struct",
+                    )
                 if self.is_valid_assignment(scope[var_name].value.attr[split[1]], expression_result):
                     scope[var_name].value.attr[split[1]].change_value(expression_result)
             elif self.is_valid_assignment(scope[var_name], expression_result):
@@ -359,7 +411,15 @@ class Interpreter(InterpreterBase):
                     else:
                         total_output = total_output + "false"
                 elif arg.elem_type == "fcall":
-                    total_output = total_output + str(self.do_func_call(arg))
+                    result = self.do_func_call(arg)
+                    if isinstance(result, bool):
+                        if result is True:
+                            result = "true"
+                        else:
+                            result = "false"
+                    total_output = total_output + str(result)
+                elif arg.elem_type == "nil":
+                    total_output = total_output + Type.NIL
                 else:
                     if arg.elem_type == "var":
                         value = self.get_variable(arg.get("name")).value
@@ -389,6 +449,10 @@ class Interpreter(InterpreterBase):
             if result is None:
                 result = self.get_default_value(return_type)
             if self.is_valid_return(result, return_type):
+                if return_type == Type.BOOL and not isinstance(result, bool) and isinstance(result, int):
+                    if result == 0:
+                        return False
+                    return True
                 return result
             super().error(
                 ErrorType.TYPE_ERROR,
@@ -488,7 +552,17 @@ class Interpreter(InterpreterBase):
             var_name, attribute = var_name.split('.')
         scope = self.get_scope(var_name)
         if attribute:
-            return scope[var_name].value.attr[attribute]
+            if scope[var_name].value != Type.NIL:
+                if attribute in scope[var_name].value.attr:
+                    return scope[var_name].value.attr[attribute]
+                super().error(
+                    ErrorType.FAULT_ERROR,
+                    f"Attribute does not exist",
+                )
+            super().error(
+                ErrorType.FAULT_ERROR,
+                f"Attribute undefined",
+            )
         if scope:
             return scope[var_name]
         super().error(
@@ -511,14 +585,20 @@ class Interpreter(InterpreterBase):
             return user_input
     
     def is_not_type_valid_op(self, exp_type, val1, val2):
-        print(val1)
-        print(val2)
+        if val1 is None or val2 is None:
+            return True
         if exp_type in self.comp_ops:
             if exp_type == "==" or exp_type == "!=":
                 if isinstance(val1, int) and isinstance(val2, int):
                     return False
-                if val1 == "nil" or val2 == "nil":
-                    return False
+                if val1 == "nil":
+                    if val2 == "nil" or type(val2) is Struct:
+                        return False
+                    return True
+                if val2 == "nil":
+                    if val1 == "nil" or type(val1) is Struct:
+                        return False
+                    return True
         # if exp_type in self.comp_ops:
         #     if not exp_type == "==" and not exp_type == "!=":
         #         if isinstance(val1, bool): return True
@@ -548,7 +628,7 @@ class Interpreter(InterpreterBase):
         if (return_type == "bool" and isinstance(result, int) or
            (return_type == "int" and not isinstance(result, bool) and isinstance(result, int)) or 
            (return_type == "string" and isinstance(result, str)) or
-           (self.struct_exists(return_type) and ((result and result != Type.NIL and return_type == result.type) or not result or result == Type.NIL)) or
+           (self.struct_exists(return_type) and ((result and result != Type.NIL and return_type == result.type) or result == Type.NIL)) or
            (return_type == "void" and result == None)):
             return True
         return False
@@ -563,5 +643,12 @@ class Interpreter(InterpreterBase):
         if(self.struct_exists(type)):
             return Type.NIL
     
+    def is_valid_type(self, type):
+        if type not in [Type.INT, Type.BOOL, Type.STRING, "void"] and not self.struct_exists(type):
+            return False
+        return True
+
     def struct_exists(self, name):
         return any(name in struct for struct in self.defined_structs)
+
+# check if you pass an int to a function that takes a boolean, if it treats it like a boolean
