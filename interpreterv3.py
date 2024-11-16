@@ -239,14 +239,27 @@ class Interpreter(InterpreterBase):
         return False
     
     def get_var_name_split(self, var_name):
-        struct_name = None
-        attr_name = None
-        if "." in var_name:
-            
-            struct_name, attr_name = var_name.split('.')
-        if struct_name and attr_name:
-            return (struct_name, attr_name)
-        return (var_name,)
+        return var_name.split('.')
+    
+    def follow_dot_refs(self, scope, split):
+        var = scope[split[0]]
+        for i in range(1, len(split) - 1):
+            var = var.value.attr[split[i]]
+            if type(var.value) is not Struct:
+                super().error(
+                    ErrorType.FAULT_ERROR,
+                    "Variable to the left of the dot is not of type struct",
+                )
+        return var
+    
+    # def get_var_name_split(self, var_name):
+    #     struct_name = None
+    #     attr_name = None
+    #     if "." in var_name:
+    #         struct_name, attr_name = var_name.split('.')
+    #     if struct_name and attr_name:
+    #         return (struct_name, attr_name)
+    #     return (var_name,)
     
     def do_assignment(self, assignment):
         var_name = assignment.get("name")
@@ -263,8 +276,17 @@ class Interpreter(InterpreterBase):
                         ErrorType.FAULT_ERROR,
                         "Variable to the left of the dot is not of type struct",
                     )
-                if self.is_valid_assignment(scope[var_name].value.attr[split[1]], expression_result):
-                    scope[var_name].value.attr[split[1]].change_value(expression_result)
+                val = self.follow_dot_refs(scope, split)
+                if split[-1] in val.value.attr:
+                    val = self.follow_dot_refs(scope, split).value.attr[split[-1]]
+                else:
+                    super().error(
+                        ErrorType.NAME_ERROR,
+                        f"Attribute does not exist",
+                    )
+                # print(scope[var_name].value.attr[split[1]])
+                if self.is_valid_assignment(val, expression_result):
+                    val.change_value(expression_result)
             elif self.is_valid_assignment(scope[var_name], expression_result):
                 scope[var_name].change_value(expression_result)
             else:
@@ -274,6 +296,7 @@ class Interpreter(InterpreterBase):
                 )
         # if len(split) > 1:
         #     print(scope[var_name].value.attr[split[1]].value)
+        # print(self.stack[0][1]['d'].value.attr['companion'].value)
             
     def evaluate_coercion(self, val1, val2):
         if val1 == 0:
@@ -423,9 +446,10 @@ class Interpreter(InterpreterBase):
                 else:
                     if arg.elem_type == "var":
                         value = self.get_variable(arg.get("name")).value
-                        if type(value) is Struct:
-                            split = self.get_var_name_split(arg.get("name"))
-                            value = value.attr[split[1]].value
+                        # if type(value) is Struct:
+                        #     print("HELLOOO")
+                        #     split = self.get_var_name_split(arg.get("name"))
+                        #     value = value.attr[split[-1]].value
                     elif arg.elem_type in self.bin_ops or arg.elem_type in self.bin_bool_ops or arg.elem_type in self.unary_ops or arg.elem_type in self.comp_ops:
                         value = self.evaluate_expression(arg)
 
@@ -547,21 +571,24 @@ class Interpreter(InterpreterBase):
         )
     
     def get_variable(self, var_name):
-        attribute = None
-        if "." in var_name:
-            var_name, attribute = var_name.split('.')
+        split = self.get_var_name_split(var_name)
+        # if "." in var_name:
+        #     # var_name, attribute = var_name.split('.')
+        #     split = var_name.split('.')
+        var_name = split[0]
         scope = self.get_scope(var_name)
-        if attribute:
+        if len(split) > 1:
             if scope[var_name].value != Type.NIL:
-                if attribute in scope[var_name].value.attr:
-                    return scope[var_name].value.attr[attribute]
+                val = self.follow_dot_refs(scope, split)
+                if split[-1] in val.value.attr:
+                    return val.value.attr[split[-1]]
                 super().error(
-                    ErrorType.FAULT_ERROR,
+                    ErrorType.NAME_ERROR,
                     f"Attribute does not exist",
                 )
             super().error(
                 ErrorType.FAULT_ERROR,
-                f"Attribute undefined",
+                f"Struct undefined",
             )
         if scope:
             return scope[var_name]
