@@ -20,9 +20,6 @@ class Interpreter(InterpreterBase):
                     if var_name in scope_vars:
                         captured_variables[var_name] = scope_vars[var_name]
 
-            # print("PRINTING")
-            # print(self.expr)
-            # print(captured_variables)
             return captured_variables
         
         def find_vars(self):
@@ -88,56 +85,13 @@ class Interpreter(InterpreterBase):
             super().error(ErrorType.NAME_ERROR, '')
 
         self.vars[-1][0][name] = None
-    
-    # def find_vars(self, expr):
-    #     expr_string = str(expr)
-    #     substrings = []
-    #     var_string = "var: name: "
-    #     start_index = 0
-        
-    #     while True:
-    #         # Find the next occurrence of "var" starting from start_index
-    #         start_index = expr_string.find(var_string, start_index)
-            
-    #         if start_index == -1:
-    #             break  # No more "var" found, exit the loop
-    #         start_index += len(var_string)
-            
-    #         # Find the position of the next "]" after "var"
-    #         end_index = expr_string.find("]", start_index)
-            
-    #         if end_index == -1:
-    #             break  # No closing bracket found, exit the loop
-            
-    #         # Extract the substring from "var" to "]"
-    #         substr = expr_string[start_index:end_index]
-
-    #         for scope_vars, is_func in self.vars[::-1]:
-    #             if substr in scope_vars:
-    #                 substrings.append((substr, scope_vars[substr]))
-    #                 break
-            
-    #         # Move the start_index past the current "]" to find the next "var"
-    #         start_index = end_index + 1
-        
-    #     print(expr_string)
-    #     print("PRINTING HERE")
-    #     substrings = tuple(set(substrings))
-    #     print(substrings)
-    #     return substrings
 
     def run_assign(self, statement):
         name = statement.get('name')
 
         for scope_vars, is_func in self.vars[::-1]:
             if name in scope_vars:
-                # scope_vars[name] = statement.get("expression")
-                # if type(scope_vars[name]) is self.LazyExpr:
-                #     print("WOAHH")
-                #     print(self.vars)
                 scope_vars[name] = self.LazyExpr(statement.get('expression'), self.vars)
-                # print(self.vars)
-                # scope_vars[name] = self.run_expr(statement.get('expression'))
                 return
 
             if is_func: break
@@ -285,6 +239,17 @@ class Interpreter(InterpreterBase):
             return self.run_fcall(expr)
 
         elif kind in self.bops:
+            if kind == '&&' or kind == '||':
+                l = self.run_expr(expr.get('op1'), vars)
+                if type(l) == bool and kind == '&&' and not l: return False
+                if type(l) == bool and kind == '||' and l: return True
+
+                r = self.run_expr(expr.get('op2'), vars)
+                if type(r) == bool and kind == '&&': return l and r
+                if type(r) == bool and kind == '||': return l or r
+
+                super().error(ErrorType.TYPE_ERROR, '')
+                
             l, r = self.run_expr(expr.get('op1'), vars), self.run_expr(expr.get('op2'), vars)
             tl, tr = type(l), type(r)
 
@@ -303,10 +268,6 @@ class Interpreter(InterpreterBase):
                 if kind == '<=': return l <= r
                 if kind == '>': return l > r
                 if kind == '>=': return l >= r
-            
-            if tl == bool and tr == bool:
-                if kind == '&&': return l and r
-                if kind == '||': return l or r
 
             super().error(ErrorType.TYPE_ERROR, '')
 
