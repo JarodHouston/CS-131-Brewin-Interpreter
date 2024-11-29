@@ -1,8 +1,12 @@
 from intbase import InterpreterBase, ErrorType
 from brewparse import parse_program
 import copy
+from enum import Enum
 
 class Interpreter(InterpreterBase):
+    class Obj(Enum):
+        CATCHERS = "catchers"
+
     class LazyExpr():
         def __init__(self, expr, vars):
             self.expr = expr
@@ -59,6 +63,7 @@ class Interpreter(InterpreterBase):
         self.cached_expr = {} # {(expr: LazyExpr or result)}
         self.temp = {}
         self.bops = {'+', '-', '*', '/', '==', '!=', '>', '>=', '<', '<=', '||', '&&'}
+        self.BREAK_TRY = False
 
     def run(self, program):
         ast = parse_program(program)
@@ -117,6 +122,8 @@ class Interpreter(InterpreterBase):
 
             for arg in args:
                 c_out = self.run_expr(arg, self.vars)
+                if type(c_out) == tuple:
+                    return c_out
                 if type(c_out) == bool:
                     out += str(c_out).lower()
                 else:
@@ -132,7 +139,23 @@ class Interpreter(InterpreterBase):
         func_def = self.funcs[(fcall_name, len(args))]
 
         template_args = [a.get('name') for a in func_def.get('args')]
-        passed_args = [self.run_expr(a, self.vars) for a in args]
+
+        passed_args = []
+        for arg in args:
+            arg_name = arg.get('name')
+            var_found = False
+            for scope_vars, is_func in self.vars[::-1]:
+                if arg_name in scope_vars:
+                    if type(scope_vars[arg_name]) is self.LazyExpr:
+                        passed_args.append(self.run_expr(arg, scope_vars[arg_name].vars))
+                    else:
+                        passed_args.append(self.run_expr(arg, self.vars))
+                    var_found = True
+                    break
+            if not var_found:
+                passed_args.append(self.run_expr(arg, self.vars))
+            
+        # passed_args = [self.run_expr(a, self.vars) for a in args]
 
         self.vars.append(({k:v for k,v in zip(template_args, passed_args)}, True))
         res, _ = self.run_statements(func_def.get('statements'))
@@ -141,14 +164,17 @@ class Interpreter(InterpreterBase):
         return res
 
     def run_if(self, statement):
+        res, ret = None, False
         cond = self.run_expr(statement.get('condition'), self.vars)
 
         if type(cond) != bool:
-            super().error(ErrorType.TYPE_ERROR, '')
+            if type(cond) == tuple:
+                res, ret = self.handle_raise(cond)
+                return res, ret
+            else:
+                super().error(ErrorType.TYPE_ERROR, '')
 
         self.vars.append(({}, False))
-
-        res, ret = None, False
 
         if cond:
             res, ret = self.run_statements(statement.get('statements'))
@@ -168,7 +194,11 @@ class Interpreter(InterpreterBase):
             cond = self.run_expr(statement.get('condition'), self.vars)
 
             if type(cond) != bool:
-                super().error(ErrorType.TYPE_ERROR, '')
+                if type(cond) == tuple:
+                    res, ret = self.handle_raise(cond)
+                    return res, ret
+                else:
+                    super().error(ErrorType.TYPE_ERROR, '')
 
             if ret or not cond: break
 
@@ -185,11 +215,73 @@ class Interpreter(InterpreterBase):
         if expr:
             return self.run_expr(expr, self.vars)
         return None
+    
+    def run_try(self, statement):
+        res, ret = None, False
+        catchers = statement.get('catchers')
+
+        self.vars.append(({}, False))
+        self.vars[-1][0][self.Obj.CATCHERS] = catchers
+
+        res, ret = self.run_statements(statement.get('statements'))
+        # if type(res) is tuple:
+        #     self.handle_raise(res)
+        #     # self.vars.pop()
+        #     # (_, raise_expr) = res
+        #     # for catcher in catchers:
+        #     #     exception_type = catcher.get('exception_type')
+        #     #     if raise_expr == exception_type:
+        #     #         self.vars.append(({}, False))
+        #     #         res, ret = self.run_statements(catcher.get('statements'))
+        #     #         self.vars.pop()
+        # else:
+        #     self.vars.pop()
+        # if type(res) is tuple: 
+        #     print("HEREEEEE")
+        #     self.handle_raise(res)
+
+        return res, ret
+
+    def run_raise(self, statement):
+        res, ret = None, False
+        res = self.run_expr(statement.get('exception_type'), self.vars)
+
+        if type(res) != str:
+            super().error(ErrorType.TYPE_ERROR, '')
+
+        return ('RAISE', res), True
+    
+    def handle_raise(self, raise_ret):
+        res, ret = None, False
+        (_, raise_expr) = raise_ret
+
+        idx = len(self.vars) - 1
+        while idx >= 0:
+            scope_vars, is_func = self.vars[idx]
+            if self.Obj.CATCHERS in scope_vars:
+                for catcher in scope_vars[self.Obj.CATCHERS]:
+                    exception_type = catcher.get('exception_type')
+                    if raise_expr == exception_type:
+                        self.vars.append(({}, False))
+                        res, ret = self.run_statements(catcher.get('statements'))
+                        self.vars.pop()
+                        idx = 0
+                        self.BREAK_TRY = True
+                        break
+            self.vars.pop()
+            idx -= 1
+        if len(self.vars) == 0:
+            super().error(ErrorType.FAULT_ERROR, '')
+                
+        return res, ret
 
     def run_statements(self, statements):
         res, ret = None, False
 
         for statement in statements:
+            # if self.BREAK_TRY:
+            #     self.BREAK_TRY = False
+            #     break
             kind = statement.elem_type
 
             if kind == 'vardef':
@@ -197,17 +289,31 @@ class Interpreter(InterpreterBase):
             elif kind == '=':
                 self.run_assign(statement)
             elif kind == 'fcall':
-                self.run_fcall(statement)
+                res = self.run_fcall(statement)
+                if type(res) is tuple: 
+                    res, ret = self.handle_raise(res)
+                    break
             elif kind == 'if':
                 res, ret = self.run_if(statement)
-                if ret: break
+                if type(res) is not tuple and ret: break
             elif kind == 'for':
                 res, ret = self.run_for(statement)
-                if ret: break
+                if type(res) is not tuple and ret: break
             elif kind == 'return':
                 res = self.run_return(statement)
                 ret = True
                 break
+            elif kind == 'try':
+                res, ret = self.run_try(statement)
+                # if type(res) is tuple and ret: break
+                if type(res) is not tuple and ret: break
+            elif kind == 'raise':
+                res, ret = self.run_raise(statement)
+                break
+            
+            if type(res) is tuple: 
+                res, ret = self.handle_raise(res)
+                # break
 
         return res, ret
 
@@ -223,10 +329,9 @@ class Interpreter(InterpreterBase):
 
             for scope_vars, is_func in vars[::-1]:
                 if var_name in scope_vars:
-                    # if hasattr(scope_vars[var_name], 'elem_type'):
-                    #     return self.run_expr(scope_vars[var_name])
                     if type(scope_vars[var_name]) is self.LazyExpr:
                         if scope_vars[var_name].result is None:
+                            # print(scope_vars[var_name].vars)
                             scope_vars[var_name].result = self.run_expr(scope_vars[var_name].expr, scope_vars[var_name].vars)
                         return scope_vars[var_name].result
                     return scope_vars[var_name]
@@ -239,18 +344,22 @@ class Interpreter(InterpreterBase):
             return self.run_fcall(expr)
 
         elif kind in self.bops:
+            l = self.run_expr(expr.get('op1'), vars)
             if kind == '&&' or kind == '||':
-                l = self.run_expr(expr.get('op1'), vars)
                 if type(l) == bool and kind == '&&' and not l: return False
                 if type(l) == bool and kind == '||' and l: return True
 
-                r = self.run_expr(expr.get('op2'), vars)
+            r = self.run_expr(expr.get('op2'), vars)
+            if kind == '&&' or kind == '||':
                 if type(r) == bool and kind == '&&': return l and r
                 if type(r) == bool and kind == '||': return l or r
 
                 super().error(ErrorType.TYPE_ERROR, '')
-                
-            l, r = self.run_expr(expr.get('op1'), vars), self.run_expr(expr.get('op2'), vars)
+            if type(l) == tuple:
+                return l 
+            if type(r) == tuple:
+                return r
+            # l, r = self.run_expr(expr.get('op1'), vars), self.run_expr(expr.get('op2'), vars)
             tl, tr = type(l), type(r)
 
             if kind == '==': return tl == tr and l == r
