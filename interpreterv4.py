@@ -63,7 +63,6 @@ class Interpreter(InterpreterBase):
         self.cached_expr = {} # {(expr: LazyExpr or result)}
         self.temp = {}
         self.bops = {'+', '-', '*', '/', '==', '!=', '>', '>=', '<', '<=', '||', '&&'}
-        self.BREAK_TRY = False
 
     def run(self, program):
         ast = parse_program(program)
@@ -219,11 +218,20 @@ class Interpreter(InterpreterBase):
     def run_try(self, statement):
         res, ret = None, False
         catchers = statement.get('catchers')
+        catchers.append(False)
+        print(catchers)
 
         self.vars.append(({}, False))
         self.vars[-1][0][self.Obj.CATCHERS] = catchers
 
-        res, ret = self.run_statements(statement.get('statements'))
+        for line in statement.get('statements'):
+            # print("here: ", self.vars[-1])
+            # if self.Obj.CATCHERS in self.vars[-1]:
+            #     print("HI")
+            if catchers[-1] is True:
+                break
+            res, ret = self.run_statements([line])
+
         # if type(res) is tuple:
         #     self.handle_raise(res)
         #     # self.vars.pop()
@@ -260,14 +268,19 @@ class Interpreter(InterpreterBase):
             scope_vars, is_func = self.vars[idx]
             if self.Obj.CATCHERS in scope_vars:
                 for catcher in scope_vars[self.Obj.CATCHERS]:
+                    print("look", res, catcher)
+                    if type(catcher) == bool:
+                        scope_vars[self.Obj.CATCHERS][-1] = True
+                        return raise_ret
                     exception_type = catcher.get('exception_type')
                     if raise_expr == exception_type:
                         self.vars.append(({}, False))
                         res, ret = self.run_statements(catcher.get('statements'))
                         self.vars.pop()
                         idx = 0
-                        self.BREAK_TRY = True
+                        scope_vars[self.Obj.CATCHERS][-1] = True
                         break
+                # scope_vars[self.Obj.CATCHERS] = (catchers, True)
             self.vars.pop()
             idx -= 1
         if len(self.vars) == 0:
@@ -276,12 +289,10 @@ class Interpreter(InterpreterBase):
         return res, ret
 
     def run_statements(self, statements):
+        # TRY BREAKING FROM STATEMENTS IN HERE WHEN CATCH IS RUN/SKIPPED
         res, ret = None, False
 
         for statement in statements:
-            # if self.BREAK_TRY:
-            #     self.BREAK_TRY = False
-            #     break
             kind = statement.elem_type
 
             if kind == 'vardef':
@@ -311,7 +322,8 @@ class Interpreter(InterpreterBase):
                 res, ret = self.run_raise(statement)
                 break
             
-            if type(res) is tuple: 
+            while type(res) is tuple: 
+                print("I AM HERE?")
                 res, ret = self.handle_raise(res)
                 # break
 
